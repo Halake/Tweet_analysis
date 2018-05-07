@@ -1,0 +1,352 @@
+---
+title: "tw"
+author: "Halake Kumar Suresh"
+date: "6 May 2018"
+output: html_document
+---
+
+```{r setup,include=FALSE}
+knitr::opts_chunk$set(cache=TRUE,
+               prompt=FALSE,
+               tidy=TRUE,
+               comment=NA,
+               message=FALSE,
+               warning=FALSE)
+```
+
+```{r,include=FALSE,echo=FALSE}
+library(twitteR)
+library(ROAuth)
+library(RCurl)
+library(RWeka)
+library(tm)
+library(wordcloud2)
+library(wordcloud)
+library(stringr)
+library(stringi)
+library(rebus)
+library(syuzhet)
+library(tidyr)
+library(e1071)
+library(rpart)
+library(pdftools)
+library(lexRankr)
+library(xml2)
+library(lubridate)
+library(dplyr)
+library(ggplot2)
+```
+
+* Each line becomes a Document(eg:each twitter or each mail)
+* Collection of documents is Corpus
+* DTM(document term matrix)
+
+  D : Each document as row,
+  T : Each unique word as a column
+
+* Transpose of DTM is TDM
+
+
+      | Banana |  is | good | yellow
+------|--------|-----|------|--------
+Doc1  |   1    |   1 |  1   |   0
+------|--------|-----|------|--------
+Doc1  |   1    |   1 |  0   |   1
+------|--------|-----|------|--------
+
+## Enter token values
+
+* https://apps.twitter.com
+
+```{r echo=FALSE,include=FALSE}
+Consumer_Key <- 'abc'
+
+Consumer_Secret<- 'xyz'
+
+Access_Token <- 	'aabbcc'
+
+Access_Token_Secret <- 	'xxyyzz'
+```
+
+## setting the authentication to connect r with twitter API
+```{r}
+setup_twitter_oauth(consumer_key = Consumer_Key,consumer_secret = Consumer_Secret,access_token = Access_Token,access_secret = Access_Token_Secret)
+
+# select 2
+```
+
+## Searching twitter
+```{r}
+gst = searchTwitter(searchString = "#GST",n = 100,lang = "en")
+
+## convert list into dataframe
+tweet_gst <- twListToDF(gst)
+head(tweet_gst)
+```
+
+## Search the tweet by scree name (twitter handler)
+```{r}
+PMO = userTimeline(user = '@PMOIndia',n = 100)
+tweet_pmo = twListToDF(PMO)
+head(tweet_pmo)
+```
+
+## location of the user
+
+```{r}
+location = lookupUsers(users = tweet_gst$screeName)
+length(location)  # Please ensure that it is not empty
+# user_location = twListToDF(location)
+```
+
+## attach location column to tweet data
+```{r}
+# tweet_location = tweet_gst %>% left_join(select(user_location,screeName,location),by = c('screeName','screeName'))
+```
+
+##------------------------------------------------------------------------------
+
+## Text mining of twitter data
+
+
+### Select only text from text column
+```{r}
+doc = gsub("[^A-Za-z//]"," ",tweet_gst$text)
+# doc = str_replace_all(string = tweet_gst$text,pattern = not_wrd,replacement = " ")
+```
+
+```{r}
+doc_corpus = Corpus(VectorSource(doc)) 
+```
+
+### Cleaning data
+```{r}
+doc_corpus = tm_map(doc_corpus,content_transformer(tolower))
+
+doc_corpus = tm_map(doc_corpus,removeWords,stopwords(kind = 'en'))
+
+custom_words = c("http","https","amp")
+
+doc_corpus = tm_map(doc_corpus,removeWords,custom_words)
+
+doc_corpus = tm_map(doc_corpus,stripWhitespace)
+
+dtm = DocumentTermMatrix(doc_corpus)
+
+dtmr = DocumentTermMatrix(doc_corpus,control = list(wordLengths=c(4,Inf))) # select only words having certain number of letters
+
+dtmr_matrix = as.matrix(dtmr)
+
+dtmr_dataframe = colSums(dtmr_matrix)
+
+dtmr_dataframe = data.frame(word = names(dtmr_dataframe),freq = dtmr_dataframe)
+
+freq_words = findFreqTerms(dtmr,lowfreq = 50,highfreq = Inf)
+
+association = findAssocs(dtmr,"yoga",corlimit = 0.2)
+```
+
+### wordcloud
+```{r}
+# wordcloud(data = dtmr_dataframe$word,size = dtmr_dataframe$freq,backgroundColor = rainbow(10),shuffle = FALSE,minSize = 4)
+wordcloud(words = dtmr_dataframe$word,min.freq = 5,freq = dtmr_dataframe$freq,colors = rainbow(10))
+```
+
+
+##------------------------------------------------------------------------------
+
+
+## Sentiment analysis
+
+```{r}
+neg_words = scan('C:/R programs/Unstructured data analysis/negative-words.txt',what = "character",comment.char = ";")
+pos_words = scan('C:/R programs/Unstructured data analysis/positive-words.txt',what = "character",comment.char = ";")
+modi_tw = read.csv('C:/R programs/Unstructured data analysis/narendramodi_tweets.csv')
+
+# Please replace this modi_tw with your own twitter dataset, which is data frame here.
+```
+
+```{r}
+pos_words = c(pos_words, 'new', 'nice', 'good', 'horizon')
+neg_words = c(neg_words, 'wtf', 'behind','feels', 'ugly', 'back','worse','shitty', 'bad', 'no','freaking','sucks','horrible')
+
+# Lets Create a sentiment score function
+
+score.sentiment = function(tweets, pos.words, neg.words)
+  
+{
+  
+  require(plyr)
+  require(stringr)
+  
+  scores = laply(tweets, function(tweet, pos.words, neg.words) {
+    
+    # Remove https:// and http://
+    tweet = gsub('https://','',tweet) 
+    tweet = gsub('http://','',tweet) 
+    
+    # Remove Graphic characters like emoticons
+    tweet = gsub('[^[:graph:]]', ' ',tweet) 
+    
+    # remove punctuation
+    tweet = gsub('[[:punct:]]', '', tweet) 
+    
+    # remove control characters
+    tweet = gsub('[[:cntrl:]]', '', tweet) 
+    
+    # remove numbers
+    tweet = gsub('\\d+', '', tweet) 
+    
+    # Case to lower
+    tweet = tolower(tweet) 
+    
+    # spliting the tweets by words in a list
+    word.list = str_split(tweet, '\\s+') 
+    
+    # turns the list to vector
+    words = unlist(word.list) 
+    
+    # returns matching values for words from list
+    pos.matches = match(words, pos.words)  
+    neg.matches = match(words, neg.words)
+    
+    # match() returns the position of the matched term or NA. we just want a TRUE/FALSE:
+    pos.matches = !is.na(pos.matches) 
+    neg.matches = !is.na(neg.matches)
+    
+    # and conveniently enough, TRUE/FALSE will be treated as 1/0 by sum():
+    score = sum(pos.matches) - sum(neg.matches) 
+    
+    return(score)
+    
+  }, pos.words, neg.words )
+  
+  scores.df = data.frame(score=scores, text=tweets)
+  
+  return(scores.df)
+  
+}
+
+
+analysis = score.sentiment(modi_tw$text, pos_words, neg_words)
+
+# Ploting the score of tweets
+
+hist(analysis$score)
+
+plot(analysis$score)
+
+analysis %>% ggplot() + geom_density(aes( x = score))
+
+analysis %>% ggplot(aes(x = score, y = 1)) + geom_text(aes(label = score))
+```
+
+```{r}
+# Subsetting only the text part of our data frame tweet
+
+tweet_text = iconv(modi_tw$text[1:100])
+
+# Obtain sentiment scores from NRC sentiment dictonary
+
+s = get_nrc_sentiment(tweet_text)
+
+head(s)
+
+## You can see the first tweet have the score of joy, suprise and positive
+
+tweet_text[1]
+
+## Lets see how nrc is treating words like wonderfully etc
+
+get_nrc_sentiment('wonderfully')
+
+## lets plot all the sentiments
+
+barplot(colSums(s), las = 2, col = rainbow(10), ylab = 'Count', main = "sentiment analysis using syuzhet")
+```
+
+
+##----------------------------------------------------------------------------------
+
+# Below is not sentiment analysis, but just a practice
+
+```{r}
+setup_twitter_oauth(consumer_key = Consumer_Key,consumer_secret = Consumer_Secret,access_token = Access_Token,access_secret = Access_Token_Secret)
+
+# select 2
+```
+
+#### Searching tweets
+```{r}
+ds = searchTwitter(searchString = "#datascience",n = 2000,lang = "en",since = "2018-01-01")
+
+## convert list into dataframe
+tweet_ds <- twListToDF(ds)
+dim(tweet_ds)
+```
+
+### Hourwise count of tweets containg #datascience
+```{r}
+tweet_ds %>%
+  mutate(Hour = hour(created)) %>% #,Minute = minute(created)
+  group_by(Hour) %>%
+  tally() %>% 
+  ggplot() +
+  geom_line(aes(x = Hour, y = n)) +
+  labs(title = "Hourwise count",x = "hour of a day", y = "Count") +
+  theme_bw() +
+  scale_x_discrete(limits = 0:23,breaks = 0:23) +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+### Minutewise count of tweets containg #datascience
+```{r}
+tweet_ds %>%
+  mutate(Minute = minute(created)) %>%
+  group_by(Minute) %>%
+  tally() %>% 
+  ggplot() +
+  geom_line(aes(x = Minute, y = n)) +
+  labs(title = "Minutewise count",x = "Minute of a day", y = "Count") +
+  theme_bw() +
+  scale_x_discrete(limits = 0:60,breaks = 0:60) +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+### Top 10 users interms of more number of twetts
+```{r}
+tweet_ds %>% group_by(screenName) %>% tally() %>% arrange(-n) %>% head(10) %>% 
+  ggplot() +
+  geom_bar(aes(x = reorder(screenName,n),y = n),stat = 'identity') +
+  geom_text(aes(x = reorder(screenName,n),y = n,label = n,hjust = 1.5))  +
+  labs(x = "User", y = "Count", title = "Top 10 users") +
+  coord_flip() +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+### Create a new column in the data itself, to identity total number of hashtags in each tweet
+```{r}
+tweet_ds = tweet_ds %>% mutate(hashtags = str_extract_all(text,pattern = SPACE %R% "#" %R% one_or_more(ALPHA)),
+                        no_hashtags = lengths(str_extract_all(text,pattern = SPACE %R% "#" %R% one_or_more(ALPHA))))
+
+tweet_ds[2:10,c('hashtags','no_hashtags')]
+
+# The hashtags column is list,to unlist it we use unnest and ungroup
+
+df = tweet_ds %>% unnest() %>% ungroup()
+dim(df)
+dim(tweet_ds)
+head(df)
+
+df1 = tweet_ds %>% separate_rows(sep = ",")
+dim(df1)
+```
+
+### Identity those users who have used #datascience as well as #machinelearning
+
+```{r}
+both = tweet_ds %>% select(text,created,id,screenName,hashtags) %>% group_by(screenName) %>% 
+  filter(tolower(hashtags) =="#datascience" & tolower(hashtags) =="#machinelearning")
+```
+
